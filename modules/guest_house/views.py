@@ -216,8 +216,6 @@ def _read_form_fields(req):
 
     if not req.visit_type:
         errors.append("Choose the visit type.")
-    if not req.purpose:
-        errors.append("Remarks are required.")
     if req.need_guest_house and req.need_hotel and not req.other_note:
         errors.append("Both guest house and hotel are requested - explain the split in 'Anything else'.")
     if req.need_ticket:
@@ -349,7 +347,7 @@ def _submit(req, is_resubmit):
         f"A new guest requisition {req.req_no} has come, please check.\n\n"
         f"Request No: {req.req_no}\n"
             f"Applicant: {req.applicant.name} ({req.department or '-'})\n"
-        f"Visit Type: {req.visit_type} - {req.purpose}\n"
+        f"Visit Type: {req.visit_type}{(' - ' + req.purpose) if req.purpose else ''}\n"
         f"Guests: {len(req.guests)} guest(s)\n"
         f"Stay: {first_arr} to {last_dep}\n"
         f"Requirements: {needs_str}\n"
@@ -363,7 +361,7 @@ def _submit(req, is_resubmit):
     ack_body = (
         f"Dear {req.applicant.name},\n\n"
         f"Your guest requisition {req.req_no} has been submitted successfully.\n\n"
-        f"Visit: {req.visit_type} - {req.purpose}\n"
+        f"Visit: {req.visit_type}{(' - ' + req.purpose) if req.purpose else ''}\n"
         f"Stay: {first_arr} to {last_dep}\n"
         f"Status: Pending approval\n\n"
         f"You will be notified as each approver in your hierarchy reviews the request.\n\n"

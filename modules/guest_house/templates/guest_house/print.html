@@ -129,11 +129,14 @@
   {% macro yn(v) %}{% if v %}<b>Yes</b> / <s>No</s>{% else %}<s>Yes</s> / <b>No</b>{% endif %}{% endmacro %}
   <div class="line">Guest House required - {{ yn(req.need_guest_house) }}</div>
   <div class="line">Hotel stay required: {{ yn(req.need_hotel) }}</div>
-  <div class="line" style="white-space:pre-line">Vehicle arrangement: {{ yn(req.need_vehicle) }} {{ req.clean_vehicle_note or '' }}</div>
-  <div class="line" style="white-space:pre-line">Food Arrangement: {{ yn(req.need_food) }} {{ req.clean_food_note or '' }}</div>
-  <div class="line" style="white-space:pre-line">Travel Ticket: {{ yn(req.need_ticket) }} {{ req.clean_ticket_note or '' }}</div>
+  <div class="line" style="white-space:pre-line">Vehicle arrangement: {{ yn(req.need_vehicle) }} {{
+    req.clean_vehicle_note or '' }}</div>
+  <div class="line" style="white-space:pre-line">Food Arrangement: {{ yn(req.need_food) }} {{ req.clean_food_note or ''
+    }}</div>
+  <div class="line" style="white-space:pre-line">Travel Ticket: {{ yn(req.need_ticket) }} {{ req.clean_ticket_note or ''
+    }}</div>
   <div class="line">All the expenses to be borne by {{ req.expenses_by }}{% if req.cost_centre %} (cost centre {{
-    req.cost_centre }}){% endif %}.<br>Remarks: {{ req.purpose }}</div>
+    req.cost_centre }}){% endif %}.{% if req.purpose %}<br>Remarks: {{ req.purpose }}{% endif %}</div>
   <div class="line">Prepared by: {{ req.applicant.name }}, {{ req.applicant.designation or '' }} ({{ req.department or
     '' }})</div>
   {% for t in approved %}

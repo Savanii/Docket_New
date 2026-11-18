@@ -1,5 +1,5 @@
 Guest requisition {{ req.req_no }} - arrangements
-Visit: {{ req.visit_type }} - {{ req.purpose }}
+Visit: {{ req.visit_type }}{% if req.purpose %} - {{ req.purpose }}{% endif %}
 {% if req.arranged_at %}Arrangement timestamp: {{ req.arranged_at.strftime('%d %b %Y %H:%M') }}{% endif %}
 
 Guests:

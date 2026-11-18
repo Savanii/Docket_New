@@ -687,10 +687,6 @@
       <div class="field"><label class="req" for="visit_type">Purpose Type</label>
         <select id="visit_type" name="visit_type" required><option value="">Select…</option>
           {% for v in visit_types %}<option {{ 'selected' if req.visit_type == v }}>{{ v }}</option>{% endfor %}</select></div>
-      <div class="field"><label for="organisation">Guests' organisation</label>
-        <input type="text" id="organisation" name="organisation" value="{{ req.organisation or '' }}" placeholder="e.g. IMS RC Auditor, ABC Ltd."></div>
-      <div class="field span2"><label class="req" for="purpose">Remarks</label>
-        <textarea id="purpose" name="purpose" rows="2" required>{{ req.purpose or '' }}</textarea></div>
     </div>
   </section>
 
