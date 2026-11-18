@@ -323,6 +323,16 @@ def test_travel_ticket_mode_validation(app):
     assert "Mumbai to Delhi" in req.ticket_note
 
 
+def test_submit_without_purpose_and_organisation(app):
+    c = as_user(app.test_client(), "1007")
+    res = submit(c, guests=1, start=3, end=5, purpose="", organisation="")
+    assert res.status_code == 302
+    req = latest()
+    assert req.purpose == ""
+    assert req.organisation == ""
+
+
+
 
 
 

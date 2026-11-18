@@ -45,10 +45,14 @@
         <dd>{{ dt(req.submitted_at) }}</dd>
         <dt>Purpose type</dt>
         <dd>{{ req.visit_type }}</dd>
+        {% if req.organisation %}
         <dt>Organisation</dt>
-        <dd>{{ req.organisation or '-' }}</dd>
+        <dd>{{ req.organisation }}</dd>
+        {% endif %}
+        {% if req.purpose %}
         <dt>Remarks</dt>
         <dd>{{ req.purpose }}</dd>
+        {% endif %}
         <dt>Expenses borne by</dt>
         <dd>
           {% if is_desk and req.status not in ('cancelled', 'completed') %}

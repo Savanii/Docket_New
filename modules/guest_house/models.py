@@ -182,8 +182,8 @@ class GuestRequest(db.Model):
     department = db.Column(db.String(150))  # snapshot at submission
 
     visit_type = db.Column(db.String(50), nullable=False)
-    purpose = db.Column(db.Text, nullable=False)
-    organisation = db.Column(db.String(200))
+    purpose = db.Column(db.Text, nullable=True, default="")
+    organisation = db.Column(db.String(200), nullable=True, default="")
     expenses_by = db.Column(db.String(50), nullable=False, default="Company")
     cost_centre = db.Column(db.String(100))
 
