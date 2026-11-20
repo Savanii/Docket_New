@@ -1,16 +1,32 @@
-Guest requisition {{ req.req_no }} - arrangements
+{{ req.site.name if req.site else 'Docket' }} · Guest Requisition Arrangements
+Requisition: {{ req.req_no }}
+Applicant: {{ req.applicant.name }} ({{ req.department or '' }})
 Visit: {{ req.visit_type }}{% if req.purpose %} - {{ req.purpose }}{% endif %}
-{% if req.arranged_at %}Arrangement timestamp: {{ req.arranged_at.strftime('%d %b %Y %H:%M') }}{% endif %}
+{% if req.arranged_at %}Arranged on: {{ req.arranged_at.strftime('%d-%m-%Y %H:%M') }} (Version {{ req.arrangement_version or 1 }}){% endif %}
 
-Guests:
-{% for g in req.guests %}- {{ g.name }}: {{ g.arrival.strftime('%d %b %Y %H:%M') }} to {{ g.departure.strftime('%d %b %Y %H:%M') }} | {{ g.stay_label }}{% if g.hotel_booking_ref %} (ref {{ g.hotel_booking_ref }}){% endif %}
+GUESTS:
+{% for g in req.guests %}{{ loop.index }}. {{ g.name }}{% if g.gender %} ({{ g.gender }}){% endif %}{% if g.designation %} · {{ g.designation }}{% endif %}{% if g.organisation %} · {{ g.organisation }}{% endif %}
+   Contact: {{ g.mobile or '-' }}{% if g.email %} | {{ g.email }}{% endif %}
+   Arrival: {{ g.arrival.strftime('%d-%m-%Y %H:%M') if g.arrival else '-' }}
+   Departure: {{ g.departure.strftime('%d-%m-%Y %H:%M') if g.departure else '-' }}
+   Stay: {{ g.stay_label }}{% if g.remarks %} ({{ g.remarks }}){% elif g.stay_type == 'hotel' and g.hotel_booking_ref %} (Ref: {{ g.hotel_booking_ref }}){% endif %}
 {% endfor %}
-{% if req.trips %}Vehicles:
-{% for t in req.trips %}- {{ t.trip_type }} {{ t.start.strftime('%d %b %H:%M') }}: {{ t.pickup or '' }} -> {{ t.drop or '' }} | {{ t.vehicle_label }}{% if t.driver_name %} | driver {{ t.driver_name }} {{ t.driver_phone or '' }}{% endif %}
+
+REQUESTED VS. ARRANGED:
+- Guest house: {{ 'YES' if req.need_guest_house else 'NO' }} | {{ req.accommodation_summary }}
+- Hotel: {{ 'YES' if req.need_hotel else 'NO' }}
+- Vehicle: {{ 'YES' if req.need_vehicle else 'NO' }}{% if req.clean_vehicle_note %}
+  {{ req.clean_vehicle_note }}{% endif %}
+- Food: {{ 'YES' if req.need_food else 'NO' }}{% if req.food_arrangement %} | Arranged: {{ req.food_arrangement }}{% endif %}{% if req.clean_food_note %}
+  {{ req.clean_food_note }}{% endif %}
+- Tickets: {{ 'YES' if req.need_ticket else 'NO' }}{% if req.ticket_arrangement %} | Arranged: {{ req.ticket_arrangement }}{% endif %}
+{% if req.desk_remarks %}Desk remarks: {{ req.desk_remarks }}{% endif %}
+
+{% if req.trips %}VEHICLE TRIPS:
+{% for t in req.trips %}- {{ t.trip_type }}: {{ t.pickup or '-' }} -> {{ t.drop or '-' }}
+  Time: {{ t.start.strftime('%d-%m-%Y %H:%M') }} to {{ t.end.strftime('%d-%m-%Y %H:%M') }}
+  Vehicle: {{ t.vehicle_label }}{% if t.driver_name %} | Driver: {{ t.driver_name }} {{ t.driver_phone or '' }}{% endif %}
 {% endfor %}{% endif %}
-{% if req.food_arrangement %}Food: {{ req.food_arrangement }}
-{% endif %}{% if req.ticket_arrangement %}Tickets: {{ req.ticket_arrangement }}
-{% endif %}{% if req.desk_remarks %}Remarks: {{ req.desk_remarks }}
-{% endif %}
+
 Best regards,
-Admin
+Docket Administration Desk

@@ -14,7 +14,7 @@ import re
 from datetime import datetime
 
 from core.db import db
-from core.models import Employee
+from core.models import Employee, Site
 
 COLUMNS = {
     "employee_id": ("EMPLOYEE ID", "EMPID", "EMP ID", "EMP CODE", "EMPLOYEE CODE"),
@@ -26,8 +26,10 @@ COLUMNS = {
     "phone": ("CONTACT NO", "MOBILE", "MOBILE NO", "PHONE"),
     "gender": ("GENDER",),
     "category": ("CATEGORY",),
+    "company_name": ("COMPANY NAME", "COMPANY", "COMPANY_NAME", "ORGANIZATION", "ORGANISATION", "COMP NAME"),
     "manager_id": ("REPORTING MANAGER ID", "REPORTING MANAGER CODE", "MANAGER ID", "RM ID",
                    "REPORTING MANAGER", "REPORTING TO", "REPORTING OFFICER"),
+    "site_code": ("SITE", "SITE CODE", "PLANT", "PLANT CODE", "LOCATION CODE", "COMPANY CODE", "UNIT"),
 }
 DEPARTMENT_RENAMES = {"IT": "Information Technology"}
 SOURCE_PRIORITY = {"manual": -1, "staff": 0, "associates": 1, "upload": 2}
@@ -80,12 +82,58 @@ def normalize(header, rows, source):
             "gender": get("gender"),
             "category": get("category"),
             "manager_id": manager,
+            "site_code": get("site_code"),
+            "company_name": get("company_name"),
             "source": source,
         }
     return list(records.values())
 
 
-def upsert(records, deactivate_missing=False, deactivate_unselected=False):
+def fetch_company_mapping(odbc):
+    """Map of employee_id -> Company Name from Mantra dbo.view_Transaction_Report."""
+    if not odbc:
+        return {}
+    import pyodbc
+    try:
+        with pyodbc.connect(odbc, timeout=15) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT DISTINCT [Employee ID], [Company Name] FROM dbo.view_Transaction_Report WHERE [Company Name] IS NOT NULL")
+            return {str(r[0]).strip(): str(r[1]).strip() for r in cur.fetchall() if r[0] and r[1]}
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Failed to fetch company mapping from Mantra: %s", exc)
+        return {}
+
+
+def resolve_site_id(rec, company_name=None, default_site_id=None, sites_by_code=None, sites_by_name=None):
+    """Resolve site_id from explicit site code, company name, or default_site_id."""
+    c_name = (company_name or rec.get("company_name") or "").strip()
+    s_code = str(rec.get("site_code") or "").strip()
+
+    # 1. Match explicit site_code if given and valid
+    if s_code and sites_by_code and s_code in sites_by_code:
+        return sites_by_code[s_code]
+
+    # 2. Match company name to known sites
+    if c_name:
+        c_upper = c_name.upper()
+        if ("JAIGARH" in c_upper or "JAIGAD" in c_upper) and sites_by_code and "5110" in sites_by_code:
+            return sites_by_code["5110"]
+        if "DHARAMTAR" in c_upper and sites_by_code and "5130" in sites_by_code:
+            return sites_by_code["5130"]
+        if sites_by_name:
+            for s_name, sid in sites_by_name.items():
+                if s_name.upper() in c_upper or c_upper in s_name.upper():
+                    return sid
+
+    # 3. Fallback to default_site_id
+    if default_site_id:
+        return default_site_id
+
+    return None
+
+
+def upsert(records, company_map=None, default_site_id=None, deactivate_missing=False, deactivate_unselected=False):
     """Insert/update employees. Returns a stats dict. Caller commits."""
     now = datetime.now()
     stats = {
@@ -98,11 +146,18 @@ def upsert(records, deactivate_missing=False, deactivate_unselected=False):
         "deactivated": 0,
     }
     existing = {e.employee_id: e for e in Employee.query.all()}
+    sites_by_code = {s.code: s.id for s in Site.query.all()}
+    sites_by_name = {s.name: s.id for s in Site.query.all()}
+    company_map = company_map or {}
 
     for rec in records:
-        emp = existing.get(rec["employee_id"])
+        emp_id = rec["employee_id"]
+        if emp_id in company_map and not rec.get("company_name"):
+            rec["company_name"] = company_map[emp_id]
+
+        emp = existing.get(emp_id)
         if emp is None:
-            emp = Employee(employee_id=rec["employee_id"], created_at=now)
+            emp = Employee(employee_id=emp_id, created_at=now)
             db.session.add(emp)
             existing[emp.employee_id] = emp
             stats["inserted"] += 1
@@ -115,14 +170,25 @@ def upsert(records, deactivate_missing=False, deactivate_unselected=False):
         else:
             stats["updated"] += 1
 
-        for field in ("name", "status", "phone", "gender", "category", "source"):
-            val = rec[field]
+        for field in ("name", "status", "phone", "gender", "category", "source", "company_name"):
+            val = rec.get(field)
             if val is not None and str(val).strip() != "":
                 setattr(emp, field, val)
         if rec["designation"]:
             emp.designation = rec["designation"]
         if rec["department"]:
             emp.department = rec["department"]
+
+        target_site = resolve_site_id(
+            rec,
+            company_name=emp.company_name,
+            default_site_id=default_site_id,
+            sites_by_code=sites_by_code,
+            sites_by_name=sites_by_name,
+        )
+        if target_site:
+            emp.site_id = target_site
+
         emp.email = rec["email"] or emp.email
         emp.last_synced_at = now
 

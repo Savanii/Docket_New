@@ -14,6 +14,22 @@ approval_node_members = db.Table(
 )
 
 
+class Site(db.Model):
+    __tablename__ = "sites"
+
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(50), unique=True, nullable=False, index=True)
+    name = db.Column(db.String(150), nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now, nullable=False)
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+    def to_dict(self):
+        return {"id": self.id, "code": self.code, "name": self.name, "is_active": self.is_active}
+
+
 class Employee(db.Model):
     __tablename__ = "employees"
 
@@ -21,6 +37,8 @@ class Employee(db.Model):
     name = db.Column(db.String(300), nullable=False)
     designation = db.Column(db.String(150))
     department = db.Column(db.String(150), index=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("sites.id", ondelete="SET NULL"), index=True)
+    company_name = db.Column(db.String(200), index=True)
     email = db.Column(db.String(150), index=True)
     phone = db.Column(db.String(50))
     gender = db.Column(db.String(20))
@@ -41,6 +59,7 @@ class Employee(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
 
     manager = db.relationship("Employee", remote_side=[employee_id])
+    site = db.relationship("Site", foreign_keys=[site_id])
 
     @property
     def is_active(self):
@@ -65,12 +84,19 @@ class Employee(db.Model):
         return {
             "id": self.employee_id, "name": self.name, "designation": self.designation or "",
             "department": self.department or "", "email": self.email or "",
+            "company_name": self.company_name or "",
+            "site_id": self.site_id,
+            "site_code": self.site.code if self.site else None,
+            "site_name": self.site.name if self.site else None,
         }
 
 
-def departments():
+def departments(site_id=None):
     """Department names, straight from the employee master."""
-    rows = db.session.query(Employee.department).filter(Employee.department.isnot(None)).distinct()
+    q = db.session.query(Employee.department).filter(Employee.department.isnot(None))
+    if site_id:
+        q = q.filter(Employee.site_id == site_id)
+    rows = q.distinct()
     return sorted(d for (d,) in rows if d)
 
 

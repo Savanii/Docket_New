@@ -31,7 +31,7 @@ def _format_target(target):
     return formataddr((name, email)) if name else email
 
 
-def send_mail(to, subject, body, cc=None):
+def send_mail(to, subject, body, cc=None, html_body=None):
     """Best effort. Returns True when handed to SMTP. Without SMTP_SERVER mail is only logged."""
     to_formatted = []
     for item in (to or []):
@@ -67,6 +67,8 @@ def send_mail(to, subject, body, cc=None):
         msg["Cc"] = ", ".join(cc_formatted)
     msg["Subject"] = subject
     msg.set_content(body)
+    if html_body:
+        msg.add_alternative(html_body, subtype="html")
 
     # Extract unique envelope addresses (RCPT TO) so SMTP server never complains about duplicates
     all_headers = msg.get_all("To", []) + msg.get_all("Cc", [])

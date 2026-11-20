@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Requisition Approval · Docket</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="icon" href="{{ url_for('static', filename='img/logo.svg') }}">
+  <style>
+    body { background: #f8fafc; min-height: 100vh; display: flex; flex-direction: column; }
+    .action-header { background: #0284c7; padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; }
+    .action-brand { display: flex; align-items: center; gap: 10px; color: #fff; text-decoration: none; font-weight: 700; font-size: 18px; }
+    .action-container { max-width: 650px; margin: 32px auto; padding: 0 16px; flex: 1; width: 100%; box-sizing: border-box; }
+    .summary-table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 16px 0; }
+    .summary-table td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .summary-table td:first-child { font-weight: 600; color: #64748b; width: 32%; background: #f8fafc; }
+    .summary-table td:last-child { color: #0f172a; }
+  </style>
+</head>
+<body>
+  <header class="action-header">
+    <a href="{{ url_for('main.home') }}" class="action-brand">
+      <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="" width="28" height="28">
+      <span>Docket</span>
+    </a>
+    {% if current_user %}
+      <span style="color:#e0f2fe;font-size:12.5px;">{{ current_user.name }}</span>
+    {% endif %}
+  </header>
+
+  <main class="action-container">
+    {% if error %}
+      <div class="card" style="text-align:center;padding:36px 24px;">
+        <div style="font-size:42px;margin-bottom:12px;">⚠️</div>
+        <h2 style="color:#b91c1c;margin-bottom:8px;">Unable to Process Request</h2>
+        <p style="color:#475569;font-size:14.5px;margin-bottom:20px;">{{ error }}</p>
+        <a href="{{ url_for('main.home') }}" class="btn btn-primary">Go to Docket Home</a>
+      </div>
+
+    {% elif success %}
+      <div class="card" style="text-align:center;padding:36px 24px;">
+        {% if outcome == 'approved' %}
+          <div style="font-size:48px;color:#16a34a;margin-bottom:10px;">✓</div>
+          <h2 style="color:#15803d;margin-bottom:8px;">Requisition Approved</h2>
+          <p style="font-size:15px;color:#334155;margin-bottom:20px;">
+            Requisition <b>{{ req_no }}</b> has been approved successfully.
+            {% if next_step %}
+              <br><span class="muted small">{{ next_step }}</span>
+            {% endif %}
+          </p>
+        {% elif outcome == 'rejected' %}
+          <div style="font-size:48px;color:#dc2626;margin-bottom:10px;">✕</div>
+          <h2 style="color:#b91c1c;margin-bottom:8px;">Requisition Rejected</h2>
+          <p style="font-size:15px;color:#334155;margin-bottom:20px;">
+            Requisition <b>{{ req_no }}</b> has been rejected. The applicant has been notified.
+          </p>
+        {% else %}
+          <div style="font-size:48px;color:#0284c7;margin-bottom:10px;">✓</div>
+          <h2 style="margin-bottom:8px;">Action Recorded</h2>
+          <p style="font-size:15px;color:#334155;margin-bottom:20px;">Requisition <b>{{ req_no }}</b> has been updated.</p>
+        {% endif %}
+
+        <div class="row" style="justify-content:center;gap:12px;">
+          {% if view_url %}
+            <a href="{{ view_url }}" class="btn btn-primary">View Requisition in Docket</a>
+          {% else %}
+            <a href="{{ url_for('main.home') }}" class="btn btn-primary">Go to Docket</a>
+          {% endif %}
+        </div>
+      </div>
+
+    {% elif already_decided %}
+      <div class="card" style="padding:28px 24px;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+          <span class="badge {{ 'b-approved' if task.status == 'approved' else 'b-rejected' }}" style="font-size:13px;padding:4px 10px;">
+            {{ task.status|title }}
+          </span>
+          <h2 style="margin:0;">{{ req_no }}</h2>
+        </div>
+        <div class="flash flash-info" style="margin-bottom:18px;">
+          ℹ️ This requisition has already been <b>{{ task.status }}</b>
+          {% if task.acted_by %}by <b>{{ task.acted_by.name }}</b>{% endif %}
+          {% if task.acted_at %}on {{ task.acted_at.strftime('%d %b %Y at %H:%M') }}{% endif %}.
+        </div>
+        {% if task.remarks %}
+          <p style="font-size:13.5px;color:#475569;"><b>Remarks:</b> {{ task.remarks }}</p>
+        {% endif %}
+        <div class="row" style="margin-top:20px;">
+          <a href="{{ view_url or url_for('main.home') }}" class="btn btn-primary">Open in Docket</a>
+        </div>
+      </div>
+
+    {% elif pending %}
+      <div class="card" style="padding:24px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
+          <div>
+            <h2 style="margin:0 0 4px 0;display:flex;align-items:center;gap:8px;">
+              {% if action == 'approve' %}
+                <span style="color:#16a34a;">✓</span> Approve Requisition
+              {% else %}
+                <span style="color:#dc2626;">✕</span> Reject Requisition
+              {% endif %}
+            </h2>
+            <div class="small muted">Requisition: <b style="color:#0f172a;">{{ req_no }}</b></div>
+          </div>
+          <span class="badge" style="background:#e0f2fe;color:#0369a1;font-weight:600;padding:4px 9px;">
+            Level: {{ task.label }}
+          </span>
+        </div>
+
+        <div style="background:{{ '#f0fdf4' if action == 'approve' else '#fef2f2' }};border:1px solid {{ '#bbf7d0' if action == 'approve' else '#fecaca' }};border-radius:6px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:{{ '#166534' if action == 'approve' else '#991b1b' }};">
+          Acting as: <b>{{ actor.name }}</b> ({{ actor.designation or actor.department or 'Approver' }})
+        </div>
+
+        <table class="summary-table">
+          <tr>
+            <td>Applicant:</td>
+            <td><b>{{ applicant_name }}</b> ({{ applicant_desig }} · {{ applicant_dept }})</td>
+          </tr>
+          {% if visit_type %}
+          <tr>
+            <td>Visit Purpose:</td>
+            <td>{{ visit_type }}{% if purpose %} - {{ purpose }}{% endif %}</td>
+          </tr>
+          {% endif %}
+          {% if dates_str %}
+          <tr>
+            <td>Dates & Guests:</td>
+            <td>{{ dates_str }}</td>
+          </tr>
+          {% endif %}
+          {% if req_str %}
+          <tr>
+            <td>Requirements:</td>
+            <td>{{ req_str }}</td>
+          </tr>
+          {% endif %}
+          {% if earlier_info %}
+          <tr>
+            <td>Earlier Approvals:</td>
+            <td>{{ earlier_info }}</td>
+          </tr>
+          {% endif %}
+        </table>
+
+        <form method="post" style="margin-top:20px;">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+
+          <div class="field" style="margin-bottom:16px;">
+            <label style="font-weight:600;font-size:13px;margin-bottom:6px;display:block;">
+              Remarks {% if action == 'reject' %}<span style="color:#dc2626;">* (Required for rejection)</span>{% else %}<span class="muted small">(Optional)</span>{% endif %}
+            </label>
+            <textarea name="remarks" rows="3" style="width:100%;box-sizing:border-box;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;" placeholder="{{ 'Please provide reason for rejection...' if action == 'reject' else 'Add any remarks or instructions...' }}" {{ 'required' if action == 'reject' else '' }}></textarea>
+          </div>
+
+          <div class="row" style="gap:10px;margin-top:20px;">
+            {% if action == 'approve' %}
+              <button type="submit" class="btn btn-primary" style="background:#16a34a;border-color:#16a34a;padding:10px 24px;font-size:14px;font-weight:700;">
+                ✓ Confirm Approval
+              </button>
+            {% else %}
+              <button type="submit" class="btn btn-bad" style="background:#dc2626;border-color:#dc2626;color:#fff;padding:10px 24px;font-size:14px;font-weight:700;">
+                ✕ Confirm Rejection
+              </button>
+            {% endif %}
+            <a href="{{ view_url or url_for('main.home') }}" class="btn">View in Docket</a>
+          </div>
+        </form>
+      </div>
+    {% endif %}
+  </main>
+</body>
+</html>

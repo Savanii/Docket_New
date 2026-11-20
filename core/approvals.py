@@ -13,20 +13,169 @@ Rules:
 """
 from datetime import datetime
 
-from flask import url_for
+from flask import current_app, has_request_context, request, url_for
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import func
 
 from core.access import can
 from core.db import db
-from core.models import ApprovalNode, ApprovalTask
+from core.mail import send_mail
+from core.models import ApprovalNode, ApprovalTask, Employee, Notification
 from core.notify import notify
 from core.registry import APPS
 
 OPEN = ("waiting", "pending")
+TOKEN_SALT = "docket-email-approval"
 
 
 class ApprovalError(Exception):
     pass
+
+
+def make_action_token(task_id, emp_id, action):
+    """Generate a secure, signed URL-safe token for one-click email approval/rejection."""
+    secret = current_app.config.get("SECRET_KEY", "docket-secret-approval")
+    s = URLSafeTimedSerializer(secret, salt=TOKEN_SALT)
+    return s.dumps({"task_id": task_id, "emp_id": emp_id, "action": action})
+
+
+def verify_action_token(token, max_age=86400 * 14):
+    """Verify signed token and return (task, actor, action) or raise ApprovalError."""
+    secret = current_app.config.get("SECRET_KEY", "docket-secret-approval")
+    s = URLSafeTimedSerializer(secret, salt=TOKEN_SALT)
+    try:
+        data = s.loads(token, max_age=max_age)
+    except SignatureExpired:
+        raise ApprovalError("This approval link has expired.")
+    except BadSignature:
+        raise ApprovalError("Invalid or corrupted approval link.")
+    task = db.session.get(ApprovalTask, data.get("task_id"))
+    if not task:
+        raise ApprovalError("Approval task no longer exists.")
+    actor = db.session.get(Employee, data.get("emp_id"))
+    if not actor:
+        raise ApprovalError("Approver employee account not found.")
+    return task, actor, data.get("action")
+
+
+def send_approval_request_email(task, record, earlier_info=""):
+    """Sends personalized email with one-click approve/reject buttons to each candidate approver."""
+    candidates = task.candidate_people
+    if not candidates:
+        return
+
+    # In-app notifications
+    for person in candidates:
+        db.session.add(Notification(
+            employee_id=person.employee_id,
+            app_code=task.app_code,
+            ref_id=task.ref_id,
+            kind="action",
+            title=f"Approval needed: {record.approval_title}",
+            body=f"Request {record.approval_title} is pending your approval at level: {task.label}.",
+            url=_url(record),
+        ))
+
+    base_url = ""
+    if has_request_context():
+        base_url = request.host_url.rstrip("/")
+    else:
+        base_url = current_app.config.get("BASE_URL") or "http://localhost:5050"
+        base_url = base_url.rstrip("/")
+
+    req_no = getattr(record, "req_no", record.approval_title)
+    applicant = getattr(record, "applicant", None)
+    app_name = applicant.name if applicant else "Employee"
+    app_dept = getattr(record, "department", None) or (applicant.department if applicant else "") or "-"
+    app_desig = (applicant.designation if applicant else "") or "-"
+    view_url = f"{base_url}{_url(record)}"
+
+    # Requisition details for guest_house
+    visit_type = getattr(record, "visit_type", "")
+    purpose = getattr(record, "purpose", "")
+    guests_list = getattr(record, "guests", [])
+    guest_count = len(guests_list) if guests_list else 0
+    first_arr = getattr(record, "first_arrival", None)
+    last_dep = getattr(record, "last_departure", None)
+    arr_str = first_arr.strftime("%d %b %Y %H:%M") if first_arr else "-"
+    dep_str = last_dep.strftime("%d %b %Y %H:%M") if last_dep else "-"
+
+    req_items = []
+    if getattr(record, "need_guest_house", False): req_items.append("Guest House")
+    if getattr(record, "need_hotel", False): req_items.append("Hotel")
+    if getattr(record, "need_vehicle", False): req_items.append("Vehicle")
+    if getattr(record, "need_food", False): req_items.append("Food")
+    if getattr(record, "need_ticket", False): req_items.append("Tickets")
+    req_str = ", ".join(req_items) if req_items else "Standard"
+
+    for person in candidates:
+        if not person.email:
+            continue
+
+        token_approve = make_action_token(task.id, person.employee_id, "approve")
+        token_reject = make_action_token(task.id, person.employee_id, "reject")
+        approve_url = f"{base_url}/approvals/email-action/{token_approve}"
+        reject_url = f"{base_url}/approvals/email-action/{token_reject}"
+
+        plain_text = (
+            f"Dear {person.name},\n\n"
+            f"A requisition is pending your approval at level: {task.label}{earlier_info}.\n\n"
+            f"Request No: {req_no}\n"
+            f"Applicant: {app_name} ({app_desig} · {app_dept})\n"
+            f"Dates: {arr_str} to {dep_str} ({guest_count} guest{'s' if guest_count != 1 else ''})\n"
+            f"Requirements: {req_str}\n\n"
+            f"To APPROVE directly from this email:\n{approve_url}\n\n"
+            f"To REJECT directly from this email:\n{reject_url}\n\n"
+            f"Or view details in Docket:\n{view_url}\n\n"
+            f"Best regards,\nDocket Administration"
+        )
+
+        html_body = f"""
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 620px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+          <div style="background: #0284c7; padding: 20px 24px; color: #ffffff;">
+            <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; opacity: 0.9;">Docket Approval Workflow</div>
+            <h1 style="margin: 6px 0 0; font-size: 20px; font-weight: 700; color: #ffffff;">Approval Needed: {req_no}</h1>
+          </div>
+          <div style="padding: 24px;">
+            <p style="margin-top: 0; font-size: 15px; color: #334155;">Dear <b>{person.name}</b>,</p>
+            <p style="font-size: 14px; color: #475569; line-height: 1.5;">The following requisition has been submitted and requires your approval at <b>{task.label}</b>{earlier_info}:</p>
+            
+            <table style="width: 100%; border-collapse: collapse; margin: 18px 0; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0; font-size: 13.5px;">
+              <tr>
+                <td style="padding: 9px 14px; font-weight: 600; color: #64748b; width: 32%; border-bottom: 1px solid #e2e8f0;">Request No:</td>
+                <td style="padding: 9px 14px; font-weight: 700; color: #0284c7; border-bottom: 1px solid #e2e8f0;">{req_no}</td>
+              </tr>
+              <tr>
+                <td style="padding: 9px 14px; font-weight: 600; color: #64748b; border-bottom: 1px solid #e2e8f0;">Applicant:</td>
+                <td style="padding: 9px 14px; color: #0f172a; border-bottom: 1px solid #e2e8f0;"><b>{app_name}</b> ({app_desig} · {app_dept})</td>
+              </tr>
+              {"<tr><td style='padding: 9px 14px; font-weight: 600; color: #64748b; border-bottom: 1px solid #e2e8f0;'>Visit Purpose:</td><td style='padding: 9px 14px; color: #0f172a; border-bottom: 1px solid #e2e8f0;'>" + (visit_type + (" - " + purpose if purpose else "")) + "</td></tr>" if visit_type else ""}
+              {"<tr><td style='padding: 9px 14px; font-weight: 600; color: #64748b; border-bottom: 1px solid #e2e8f0;'>Guests & Dates:</td><td style='padding: 9px 14px; color: #0f172a; border-bottom: 1px solid #e2e8f0;'>" + f"{guest_count} guest(s) · {arr_str} to {dep_str}" + "</td></tr>" if guest_count else ""}
+              {"<tr><td style='padding: 9px 14px; font-weight: 600; color: #64748b; border-bottom: 1px solid #e2e8f0;'>Requirements:</td><td style='padding: 9px 14px; color: #0f172a; border-bottom: 1px solid #e2e8f0;'>" + req_str + "</td></tr>" if req_str else ""}
+            </table>
+
+            <div style="text-align: center; margin: 28px 0 20px;">
+              <a href="{approve_url}" style="display: inline-block; background: #16a34a; color: #ffffff; text-decoration: none; padding: 12px 28px; font-size: 15px; font-weight: 700; border-radius: 6px; margin: 6px 8px; box-shadow: 0 2px 4px rgba(22, 163, 74, 0.25);">
+                ✓ Approve Request
+              </a>
+              <a href="{reject_url}" style="display: inline-block; background: #dc2626; color: #ffffff; text-decoration: none; padding: 12px 28px; font-size: 15px; font-weight: 700; border-radius: 6px; margin: 6px 8px; box-shadow: 0 2px 4px rgba(220, 38, 38, 0.25);">
+                ✗ Reject Request
+              </a>
+            </div>
+            
+            <div style="text-align: center; margin-top: 14px;">
+              <a href="{view_url}" style="font-size: 13px; color: #0284c7; text-decoration: none; font-weight: 500;">
+                Review full details in Docket →
+              </a>
+            </div>
+          </div>
+          <div style="background: #f8fafc; padding: 14px 24px; font-size: 11.5px; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0;">
+            This email was sent by Docket. Clicking Approve or Reject will take you to a secure one-click confirmation screen.
+          </div>
+        </div>
+        """
+
+        send_mail([person], f"[Docket] Approval needed: {record.approval_title}", plain_text, html_body=html_body)
 
 
 def route(app_code, applicant):
@@ -113,16 +262,7 @@ def _advance(app_code, ref_id, rnd):
             e_parts = [f"{t.label}" for t in earlier_approved]
             earlier_info = f"\nApproved earlier at: {', '.join(e_parts)}"
 
-        body_msg = (
-            f"Dear Approver,\n\n"
-            f"A requisition is pending your approval.\n\n"
-            f"Request: {record.approval_title}\n"
-            f"Level: {task.label}{earlier_info}\n\n"
-            f"Please check and provide your approval in Docket.\n\n"
-            f"Best regards,\nAdmin"
-        )
-        notify(task.candidate_people, app_code, ref_id, f"Approval needed: {record.approval_title}",
-               _url(record), body_msg, kind="action", include_link_in_email=False)
+        send_approval_request_email(task, record, earlier_info=earlier_info)
         return "pending"
     return "approved"
 

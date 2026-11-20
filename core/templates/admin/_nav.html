@@ -4,6 +4,7 @@
   <a href="{{ url_for('admin.index') }}" class="{{ 'on' if active == 'index' }}">Overview</a>
   {% if current_user.is_superadmin %}
   <a href="{{ url_for('admin.employees') }}" class="{{ 'on' if active == 'employees' }}">Employees</a>
+  <a href="{{ url_for('admin.sites_page') }}" class="{{ 'on' if active == 'sites' }}">Sites</a>
   <a href="{{ url_for('admin.sync_page') }}" class="{{ 'on' if active == 'sync' }}">Sync / Import</a>
   {% endif %}
   <a href="{{ url_for('admin.apps') }}" class="{{ 'on' if active == 'apps' }}">Applications</a>

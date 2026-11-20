@@ -332,6 +332,123 @@ def test_submit_without_purpose_and_organisation(app):
     assert req.organisation == ""
 
 
+def test_site_isolation(app):
+    from core.models import Site
+    from modules.guest_house.models import GuestHouse, Room
+    with app.app_context():
+        site_jgd = Site.query.filter_by(code="5110").one()
+        site_dhr = Site.query.filter_by(code="5130").one()
+
+        # Create a Dharamtar user
+        dhr_user = db.session.get(Employee, "5130_001") or Employee(
+            employee_id="5130_001", name="Dharamtar Requester", department="Marine Operations",
+            reporting_manager_id="1006", site_id=site_dhr.id, status="Active", source="manual"
+        )
+        db.session.add(dhr_user)
+
+        from core.models import AppGrant
+        db.session.add(AppGrant(app_code="guest_house", permission="desk", subject_type="employee", subject_value="5130_001"))
+        db.session.add(AppGrant(app_code="guest_house", permission="masters", subject_type="employee", subject_value="5130_001"))
+
+        # Create a Dharamtar Guest House and Room
+        gh_dhr = GuestHouse.query.filter_by(name="Dharamtar Port GH").first()
+        if not gh_dhr:
+            gh_dhr = GuestHouse(name="Dharamtar Port GH", location="Dharamtar", site_id=site_dhr.id)
+            db.session.add(gh_dhr)
+            db.session.flush()
+            db.session.add(Room(guest_house=gh_dhr, room_no="D-101", room_type="Single", capacity=1, site_id=site_dhr.id))
+        dhr_id = site_dhr.id
+        db.session.commit()
+
+    c = as_user(app.test_client(), "5130_001")
+    res = submit(c, guests=1, start=3, end=5)
+    assert res.status_code == 302
+    req = latest()
+    assert req.applicant_id == "5130_001"
+    assert req.site_id == dhr_id
+
+    # Verify site filtering in masters and desk
+    c_dhr = as_user(app.test_client(), "5130_001")
+    res_dhr = c_dhr.get("/apps/guest_house/masters/guest-houses")
+    html_dhr = res_dhr.get_data(as_text=True)
+    assert "Dharamtar Port GH" in html_dhr
+    assert "Jaigarh Guest House" not in html_dhr
+
+    # Jaigad user only sees Jaigarh GH
+    c_jgd = as_user(app.test_client(), "1004")
+    res_jgd = c_jgd.get("/apps/guest_house/masters/guest-houses")
+    html_jgd = res_jgd.get_data(as_text=True)
+    assert "Jaigarh Guest House" in html_jgd
+    assert "Dharamtar Port GH" not in html_jgd
+
+
+def test_employee_sync_company_mapping(app):
+    from core.models import Site, Employee
+    from core import sync
+
+    with app.app_context():
+        site_jgd = Site.query.filter_by(code="5110").first()
+        site_dhr = Site.query.filter_by(code="5130").first()
+        jgd_id = site_jgd.id
+        dhr_id = site_dhr.id
+
+        header = ["EMPLOYEE ID", "NAME", "DESIGNATION", "DEPARTMENT", "STATUS", "COMPANY NAME"]
+        rows = [
+            ["TEST_JGD", "Jaigad Worker", "Engineer", "Marine", "Active", "JSW Jaigarh Port Ltd"],
+            ["TEST_DHR", "Dharamtar Worker", "Supervisor", "Operations", "Active", "JSW Dharamtar Port Pvt. Limited"],
+            ["TEST_MAP", "Mapped Worker", "Technician", "IT", "Active", None],
+            ["TEST_DEF", "Default Worker", "Helper", "Logistics", "Active", None],
+        ]
+        records = sync.normalize(header, rows, "staff")
+        company_map = {"TEST_MAP": "JSW Jaigarh Port Ltd"}
+
+        stats = sync.upsert(records, company_map=company_map, default_site_id=dhr_id)
+        db.session.commit()
+
+        emp_jgd = db.session.get(Employee, "TEST_JGD")
+        emp_dhr = db.session.get(Employee, "TEST_DHR")
+        emp_map = db.session.get(Employee, "TEST_MAP")
+        emp_def = db.session.get(Employee, "TEST_DEF")
+
+        assert emp_jgd.site_id == jgd_id
+        assert emp_jgd.company_name == "JSW Jaigarh Port Ltd"
+
+        assert emp_dhr.site_id == dhr_id
+        assert emp_dhr.company_name == "JSW Dharamtar Port Pvt. Limited"
+
+        assert emp_map.site_id == jgd_id
+        assert emp_map.company_name == "JSW Jaigarh Port Ltd"
+
+        assert emp_def.site_id == dhr_id
+
+    # Test /api/employees site isolation
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess["emp_id"] = "admin"
+        sess["active_site_id"] = jgd_id
+
+    res_j = client.get("/api/employees?q=Worker")
+    names_j = [p["name"] for p in res_j.json]
+    assert "Jaigad Worker" in names_j
+    assert "Mapped Worker" in names_j
+    assert "Dharamtar Worker" not in names_j
+    assert "Default Worker" not in names_j
+
+    with client.session_transaction() as sess:
+        sess["emp_id"] = "admin"
+        sess["active_site_id"] = dhr_id
+
+    res_d = client.get("/api/employees?q=Worker")
+    names_d = [p["name"] for p in res_d.json]
+    assert "Dharamtar Worker" in names_d
+    assert "Default Worker" in names_d
+    assert "Jaigad Worker" not in names_d
+    assert "Mapped Worker" not in names_d
+
+
+
+
+
 
 
 

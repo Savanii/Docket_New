@@ -2,29 +2,63 @@
 {% block title %}Employees{% endblock %}
 {% block content %}
 {% set heading, active = "Employees", "employees" %}{% include "admin/_nav.html" %}
+
+{% if (unassigned_count|default(0)) > 0 %}
+<div class="flash flash-info row" style="align-items:center;justify-content:space-between;margin-bottom:12px;padding:8px 14px;">
+  <span>ℹ️ There are <b>{{ unassigned_count|default(0) }}</b> employees not yet assigned to any site.</span>
+  <form method="post" action="{{ url_for('admin.bulk_assign_site') }}" class="row" style="gap:8px;margin:0;">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="assign_unassigned" value="1">
+    <select name="target_site_id" style="font-size:12.5px;height:30px;padding:2px 8px;">
+      {% for s in sites|default([]) %}
+      <option value="{{ s.id }}">{{ s.name }} ({{ s.code }})</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-sm btn-outline">Assign all to site</button>
+  </form>
+</div>
+{% endif %}
+
 <form class="row" method="get" style="margin-bottom:14px">
-  <input type="search" name="q" value="{{ request.args.q or '' }}" placeholder="Name, ID, designation, email" style="max-width:300px">
-  <select name="dept" style="max-width:240px"><option value="">All departments</option>
+  <input type="search" name="q" value="{{ request.args.q or '' }}" placeholder="Name, ID, designation, email" style="max-width:280px">
+  <select name="site" style="max-width:180px">
+    {% for s in sites|default([]) %}
+    <option value="{{ s.id }}" {{ 'selected' if selected_site == s.id }}>{{ s.name }} ({{ s.code }})</option>
+    {% endfor %}
+    <option value="all" {{ 'selected' if selected_site == 'all' }}>All sites</option>
+    <option value="unassigned" {{ 'selected' if selected_site == 'unassigned' }}>Unassigned ({{ unassigned_count|default(0) }})</option>
+  </select>
+  <select name="dept" style="max-width:200px"><option value="">All departments</option>
     {% for d in departments %}<option {{ 'selected' if request.args.dept == d }}>{{ d }}</option>{% endfor %}</select>
-  <select name="source" style="max-width:160px">
+  <select name="source" style="max-width:140px">
     <option value="">All sources</option>
     <option value="staff" {{ 'selected' if request.args.source == 'staff' }}>Staff (Employees)</option>
     <option value="associates" {{ 'selected' if request.args.source == 'associates' }}>Associates</option>
     <option value="manual" {{ 'selected' if request.args.source == 'manual' }}>Manual</option>
   </select>
-  <select name="status" style="max-width:150px">
+  <select name="status" style="max-width:130px">
     {% for s in ['Active', 'Inactive', ''] %}<option value="{{ s }}" {{ 'selected' if request.args.get('status', 'Active') == s }}>{{ s or 'Any status' }}</option>{% endfor %}</select>
   <label class="row" style="margin:0"><input type="checkbox" name="no_manager" value="1" {{ 'checked' if request.args.no_manager }}> No manager</label>
   <button class="btn">Filter</button><span class="spacer"></span>
   <a class="btn btn-primary" href="{{ url_for('admin.employee_edit') }}">Add employee</a>
 </form>
 <div class="tbl-wrap"><table class="tbl">
-  <thead><tr><th>ID</th><th>Name</th><th>Designation</th><th>Department</th><th>Reports to</th><th>Email</th><th>Source</th><th></th></tr></thead>
+  <thead><tr><th>ID</th><th>Name</th><th>Site</th><th>Designation</th><th>Department</th><th>Reports to</th><th>Email</th><th>Source</th><th></th></tr></thead>
   <tbody>
   {% for e in people %}
     <tr class="{{ '' if e.is_active else 'off' }}">
       <td class="mono">{{ e.employee_id }}</td>
-      <td>{{ e.name }}{% if e.is_superadmin %} <span class="badge b-arranged">super admin</span>{% endif %}</td>
+      <td>
+        <div>{{ e.name }}{% if e.is_superadmin %} <span class="badge b-arranged">super admin</span>{% endif %}</div>
+        {% if e.company_name %}<div class="small muted" style="font-size:11px;color:#64748b;">{{ e.company_name }}</div>{% endif %}
+      </td>
+      <td>
+        {% if e.site %}
+          <span class="badge" style="background:#e0f2fe;color:#0369a1;font-size:11px;">{{ e.site.name }} ({{ e.site.code }})</span>
+        {% else %}
+          <span class="badge" style="background:#f1f5f9;color:#64748b;font-size:11px;">Unassigned</span>
+        {% endif %}
+      </td>
       <td>{{ e.designation or '' }}</td><td>{{ e.department or '' }}</td>
       <td>{{ e.manager.name if e.manager else '' }}{% if e.manager_locked %} <span class="small muted" title="Set by hand; sync won't change it">(manual)</span>{% endif %}</td>
       <td class="small">{{ e.email or '' }}</td><td><span class="badge">{{ e.source }}</span></td>
@@ -34,7 +68,7 @@
           <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn btn-sm" title="See the portal as this person">View as</button></form>{% endif %}
       </td>
     </tr>
-  {% else %}<tr><td colspan="8" class="empty">No employees match.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="9" class="empty">No employees match.</td></tr>{% endfor %}
   </tbody>
 </table></div>
 <div class="row" style="margin-top:10px"><span class="muted">{{ total }} employees</span><span class="spacer"></span>

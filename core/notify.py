@@ -9,7 +9,7 @@ from core.mail import send_mail
 from core.models import Notification
 
 
-def notify(people, app_code, ref_id, title, url="", body="", kind="update", email=True, cc_people=None, include_link_in_email=True):
+def notify(people, app_code, ref_id, title, url="", body="", kind="update", email=True, cc_people=None, include_link_in_email=True, html_body=None):
     """kind: 'action' = someone must act, 'update' = for information."""
     people_map = {}
     for p in (people or []):
@@ -48,7 +48,7 @@ def notify(people, app_code, ref_id, title, url="", body="", kind="update", emai
     if email:
         link = urljoin(request.host_url, url) if url and has_request_context() else url
         email_body = f"{body}\n\n{link}".strip() if (include_link_in_email and link) else body.strip()
-        send_mail(people, f"[Docket] {title}", email_body, cc=cc_people)
+        send_mail(people, f"[Docket] {title}", email_body, cc=cc_people, html_body=html_body)
 
 
 def unread(emp, app_code=None):

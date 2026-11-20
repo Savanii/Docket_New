@@ -19,9 +19,12 @@ from core import sync
 from core.db import db
 
 
-def sync_employees(include_staff=None, include_associates=None, active_only=None, deactivate_missing=None, deactivate_unselected=None):
+def sync_employees(include_staff=None, include_associates=None, active_only=None, deactivate_missing=None, deactivate_unselected=None, site_code=None):
     app = create_app()
     with app.app_context():
+        from core.models import Site
+        site = Site.query.filter_by(code=site_code).first() if site_code else None
+        default_site_id = site.id if site else None
         odbc = app.config.get("SOURCE_ODBC")
         if not odbc:
             return {
@@ -74,7 +77,14 @@ def sync_employees(include_staff=None, include_associates=None, active_only=None
                 records += sync.normalize(header, rows, source)
 
             records.sort(key=lambda r: sync.SOURCE_PRIORITY.get(r["source"], 9), reverse=True)
-            stats = sync.upsert(records, deactivate_missing=deactivate_missing, deactivate_unselected=deactivate_unselected)
+            company_map = sync.fetch_company_mapping(odbc)
+            stats = sync.upsert(
+                records,
+                company_map=company_map,
+                default_site_id=default_site_id,
+                deactivate_missing=deactivate_missing,
+                deactivate_unselected=deactivate_unselected,
+            )
             db.session.commit()
             duration = round(time.time() - start_time, 2)
             total_upserted = stats["inserted"] + stats["updated"]
@@ -122,6 +132,11 @@ def main():
         action="store_true",
         help="Mark employees missing from the feed as Inactive",
     )
+    parser.add_argument(
+        "--site-code",
+        default=None,
+        help="Site code to assign (e.g. 5110 or 5130)",
+    )
 
     args = parser.parse_args()
 
@@ -147,6 +162,7 @@ def main():
         include_associates=include_associates,
         active_only=args.active_only,
         deactivate_missing=args.deactivate_missing,
+        site_code=args.site_code,
     )
 
     print("-" * 65)

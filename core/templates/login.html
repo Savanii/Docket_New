@@ -10,7 +10,7 @@
 <body>
 <div class="login">
   <div class="login-card">
-    <div class="brand"><img src="{{ url_for('static', filename='img/logo.svg') }}" alt="" width="48" height="48"><div><h1>Docket</h1><div class="small muted">{{ config.COMPANY_NAME }}</div></div></div>
+    <div class="brand"><img src="{{ url_for('static', filename='img/logo.svg') }}" alt="" width="48" height="48"><div><h1>Docket</h1></div></div>
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}<div class="flash flash-{{ cat }}">{{ msg }}</div>{% endfor %}
     {% endwith %}
