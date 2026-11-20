@@ -1,6 +1,6 @@
 """Demo data: `flask seed-demo`. Fictional people; safe to run more than once."""
 from core.db import db
-from core.models import AppGrant, ApprovalNode, Employee
+from core.models import AppGrant, ApprovalNode, Employee, Site
 PEOPLE = [
     # id, name, designation, department, manager
     ("1001", "Arjun Mehta", "Unit Head", "Management", None),
@@ -38,17 +38,28 @@ def _build(spec, parent=None, position=0):
 
 
 def seed():
+    site_jgd = Site.query.filter_by(code="5110").first()
+    if not site_jgd:
+        site_jgd = Site(code="5110", name="JSW Jaigarh Port")
+        db.session.add(site_jgd)
+    site_dhr = Site.query.filter_by(code="5130").first()
+    if not site_dhr:
+        site_dhr = Site(code="5130", name="JSW Dharamtar")
+        db.session.add(site_dhr)
+    db.session.flush()
+
     if Employee.query.filter(Employee.employee_id != "admin").count():
         print("Employees already exist - skipping people.")
     else:
         for emp_id, name, desig, dept, mgr in PEOPLE:
             db.session.add(Employee(employee_id=emp_id, name=name, designation=desig, department=dept,
                                     email=f"{name.split()[0].lower()}@example.com", reporting_manager_id=mgr,
-                                    source="manual", status="Active"))
+                                    site_id=site_jgd.id, source="manual", status="Active"))
         db.session.flush()
 
     admin = db.session.get(Employee, "admin") or Employee(employee_id="admin", name="Administrator", source="manual")
     admin.is_superadmin, admin.status = True, "Active"
+    admin.site_id = site_jgd.id
     if not admin.password_hash:
         admin.set_password("admin123")
     db.session.add(admin)
@@ -62,20 +73,20 @@ def seed():
         _build(CHART)
     from modules.guest_house.models import GuestHouse, Hotel, Room, Vehicle, VisitPurpose, ExpenseBorneBy, VISIT_TYPES, EXPENSES_BY
     if not GuestHouse.query.count():
-        gh1 = GuestHouse(name="Jaigarh Guest House", location="Jaigarh", contact_phone="02357-000000")
-        gh2 = GuestHouse(name="Colony Guest House", location="Port colony")
+        gh1 = GuestHouse(name="Jaigarh Guest House", location="Jaigarh", contact_phone="02357-000000", site_id=site_jgd.id)
+        gh2 = GuestHouse(name="Colony Guest House", location="Port colony", site_id=site_jgd.id)
         db.session.add_all([gh1, gh2])
         for no, kind, beds in [("101", "Single", 1), ("102", "Double", 2), ("103", "Double", 2), ("104", "Suite", 2),
                                ("105", "Twin", 2), ("106", "Single", 1)]:
-            db.session.add(Room(guest_house=gh1, room_no=no, room_type=kind, capacity=beds))
+            db.session.add(Room(guest_house=gh1, room_no=no, room_type=kind, capacity=beds, site_id=site_jgd.id))
         for no, kind, beds in [("A1", "Double", 2), ("A2", "Double", 2), ("A3", "Dormitory", 6)]:
-            db.session.add(Room(guest_house=gh2, room_no=no, room_type=kind, capacity=beds))
+            db.session.add(Room(guest_house=gh2, room_no=no, room_type=kind, capacity=beds, site_id=site_jgd.id))
         db.session.add_all([
             Hotel(name="Sea View Residency", city="Ratnagiri", phone="02352-000000", tariff="Rs 4,500 + tax (CP)"),
             Hotel(name="Harbour Inn", city="Ganpatipule", phone="02357-111111", tariff="Rs 3,800 (EP)"),
-            Vehicle(reg_no="MH08AB1234", model="Innova Crysta", vehicle_type="MUV", seats=7, driver_name="Suresh", driver_phone="9000000001"),
-            Vehicle(reg_no="MH08CD5678", model="Dzire", vehicle_type="Sedan", seats=4, driver_name="Mahesh", driver_phone="9000000002"),
-            Vehicle(reg_no="MH08EF9012", model="Tempo Traveller", vehicle_type="Tempo Traveller", seats=12, ownership="Leased"),
+            Vehicle(reg_no="MH08AB1234", model="Innova Crysta", vehicle_type="MUV", seats=7, driver_name="Suresh", driver_phone="9000000001", site_id=site_jgd.id),
+            Vehicle(reg_no="MH08CD5678", model="Dzire", vehicle_type="Sedan", seats=4, driver_name="Mahesh", driver_phone="9000000002", site_id=site_jgd.id),
+            Vehicle(reg_no="MH08EF9012", model="Tempo Traveller", vehicle_type="Tempo Traveller", seats=12, ownership="Leased", site_id=site_jgd.id),
         ])
     if not VisitPurpose.query.count():
         for name in VISIT_TYPES:

@@ -50,14 +50,20 @@ def get_expenses_by():
 
 def get_locations():
     try:
-        return Location.query.filter_by(is_active=True).order_by(Location.point_name).all()
+        q = Location.query.filter_by(is_active=True)
+        if g.get("site_id"):
+            q = q.filter((Location.site_id == g.site_id) | (Location.site_id.is_(None)))
+        return q.order_by(Location.point_name).all()
     except Exception:
         return []
 
 
 def get_food_locations():
     try:
-        return FoodLocation.query.filter_by(is_active=True).order_by(FoodLocation.name).all()
+        q = FoodLocation.query.filter_by(is_active=True)
+        if g.get("site_id"):
+            q = q.filter((FoodLocation.site_id == g.site_id) | (FoodLocation.site_id.is_(None)))
+        return q.order_by(FoodLocation.name).all()
     except Exception:
         return []
 
@@ -200,6 +206,8 @@ def _read_form(req):
 def _read_form_fields(req):
     f = request.form
     errors = []
+    if not req.site_id:
+        req.site_id = g.get("site_id")
     valid_visit_types = set(get_visit_types())
     if req.visit_type:
         valid_visit_types.add(req.visit_type)
@@ -589,19 +597,37 @@ def desk():
     booking_statuses = ("approved", "arranged", "completed")
 
     # 1. Actionable queues
-    to_arrange = GuestRequest.query.filter_by(status="approved").order_by(GuestRequest.decided_at).all()
-    arranged = GuestRequest.query.filter_by(status="arranged").all()
-    arranged.sort(key=lambda r: r.first_arrival or datetime.max)
-    in_house = Guest.query.join(GuestRequest).filter(
+    site_id = g.get("site_id")
+    q_to_arrange = GuestRequest.query.filter_by(status="approved")
+    q_arranged = GuestRequest.query.filter_by(status="arranged")
+    q_in_house = Guest.query.join(GuestRequest).filter(
         GuestRequest.status.in_(("arranged", "completed")),
         Guest.checked_in_at.isnot(None),
         Guest.checked_out_at.is_(None)
-    ).all()
-    awaiting_approval = GuestRequest.query.filter_by(status="pending").order_by(GuestRequest.id).all()
+    )
+    q_awaiting = GuestRequest.query.filter_by(status="pending")
+    q_houses = GuestHouse.query
+    q_rooms = Room.query.join(GuestHouse)
+    q_vehicles = Vehicle.query
+
+    if site_id:
+        q_to_arrange = q_to_arrange.filter(GuestRequest.site_id == site_id)
+        q_arranged = q_arranged.filter(GuestRequest.site_id == site_id)
+        q_in_house = q_in_house.filter(GuestRequest.site_id == site_id)
+        q_awaiting = q_awaiting.filter(GuestRequest.site_id == site_id)
+        q_houses = q_houses.filter(GuestHouse.site_id == site_id)
+        q_rooms = q_rooms.filter(GuestHouse.site_id == site_id)
+        q_vehicles = q_vehicles.filter((Vehicle.site_id == site_id) | (Vehicle.site_id.is_(None)))
+
+    to_arrange = q_to_arrange.order_by(GuestRequest.decided_at).all()
+    arranged = q_arranged.all()
+    arranged.sort(key=lambda r: r.first_arrival or datetime.max)
+    in_house = q_in_house.all()
+    awaiting_approval = q_awaiting.order_by(GuestRequest.id).all()
 
     # 2. Rooms Occupancy & Vacancy Grid
-    houses = GuestHouse.query.order_by(GuestHouse.name).all()
-    rooms = Room.query.join(GuestHouse).order_by(GuestHouse.name, Room.room_no).all()
+    houses = q_houses.order_by(GuestHouse.name).all()
+    rooms = q_rooms.order_by(GuestHouse.name, Room.room_no).all()
 
     gh_guests = Guest.query.join(GuestRequest).filter(
         Guest.stay_type == "guest_house",
@@ -648,7 +674,7 @@ def desk():
         room_grid[h] = room_list
 
     # 3. Vehicles Availability & Vacancy Grid
-    vehicles = Vehicle.query.order_by(Vehicle.reg_no).all()
+    vehicles = q_vehicles.order_by(Vehicle.reg_no).all()
     trips = Trip.query.join(GuestRequest).filter(
         GuestRequest.status.in_(booking_statuses),
         Trip.end >= window_start,
@@ -812,6 +838,96 @@ def get_applicant_hierarchy(req):
     return list(hierarchy.values())
 
 
+def _parse_schedule_notes(text):
+    if not text:
+        return []
+    items = []
+    current_guest = ""
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        gm = re.match(r"^Guest\s+\d+\s*\((.*?)\):?", line, re.IGNORECASE)
+        if gm:
+            current_guest = gm.group(1).strip()
+            continue
+        if line.startswith("•") or line.startswith("-") or line.startswith("*"):
+            clean_line = re.sub(r"^[•\-\*]\s*", "", line).strip()
+            items.append({"guest": current_guest, "detail": clean_line, "raw": line})
+        elif current_guest and ":" in line and not line.lower().startswith("daily"):
+            items.append({"guest": current_guest, "detail": line, "raw": line})
+        elif not current_guest and not line.lower().startswith("daily"):
+            items.append({"guest": "", "detail": line, "raw": line})
+    return items
+
+
+def _build_arrangement_email_context(req):
+    v_items = _parse_schedule_notes(req.clean_vehicle_note)
+    f_items = _parse_schedule_notes(req.clean_food_note)
+
+    trips = list(req.trips)
+    vehicle_rows = []
+    if v_items:
+        for idx, item in enumerate(v_items):
+            admin_note = ""
+            if idx < len(trips):
+                t = trips[idx]
+                dr = f" · {t.driver_name} {t.driver_phone or ''}".strip() if t.driver_name else ""
+                admin_note = f"{t.trip_type}: {t.vehicle_label}{dr}"
+            elif len(trips) == 1:
+                t = trips[0]
+                dr = f" · {t.driver_name} {t.driver_phone or ''}".strip() if t.driver_name else ""
+                admin_note = f"{t.trip_type}: {t.vehicle_label}{dr}"
+            vehicle_rows.append({
+                "guest": item["guest"],
+                "detail": item["detail"],
+                "note": "",
+                "admin_use": admin_note
+            })
+    else:
+        trips_summary = "<br>".join([
+            f"{t.trip_type}: {t.vehicle_label}" + (f" · {t.driver_name} {t.driver_phone or ''}" if t.driver_name else "")
+            for t in trips
+        ]) or "-"
+        vehicle_rows.append({
+            "guest": "",
+            "detail": "",
+            "note": req.clean_vehicle_note or "",
+            "admin_use": trips_summary
+        })
+
+    food_rows = []
+    if f_items:
+        for item in f_items:
+            food_rows.append({
+                "guest": item["guest"],
+                "detail": item["detail"],
+                "note": "",
+                "admin_use": ""
+            })
+    else:
+        food_rows.append({
+            "guest": "",
+            "detail": "",
+            "note": req.clean_food_note or "",
+            "admin_use": ""
+        })
+
+    stay_labels = []
+    for g in req.guests:
+        if g.stay_type in ("guest_house", "hotel") and g.stay_label:
+            if g.stay_label not in stay_labels:
+                stay_labels.append(g.stay_label)
+    accommodation_summary = "<br>".join(stay_labels) if stay_labels else req.accommodation_summary
+
+    return {
+        "req": req,
+        "vehicle_rows": vehicle_rows,
+        "food_rows": food_rows,
+        "accommodation_summary": accommodation_summary,
+    }
+
+
 @bp.route("/requests/<int:req_id>/arrange", methods=["GET", "POST"])
 @P("desk")
 def arrange(req_id):
@@ -849,14 +965,16 @@ def arrange(req_id):
             should_send_mail = (has_gh or has_vehicle or has_food)
 
             subject_title = f"{req.req_no}: arrangements {'confirmed' if first_time else 'updated'}"
+            mail_ctx = _build_arrangement_email_context(req)
+            html_details = render_template("guest_house/arrangement_mail.html", **mail_ctx)
             details = render_template("guest_house/arrangement_mail.txt", req=req)
 
             if should_send_mail:
                 hierarchy = get_applicant_hierarchy(req)
-                notify([req.applicant], CODE, req.id, subject_title, _link(req), details, cc_people=hierarchy, include_link_in_email=False)
+                notify([req.applicant], CODE, req.id, subject_title, _link(req), details, cc_people=hierarchy, include_link_in_email=False, html_body=html_details)
                 guest_emails = [x.email.strip() for x in req.guests if x.email and '@' in x.email and '.' in x.email.split('@')[-1]]
                 if guest_emails:
-                    send_mail(guest_emails, "Your visit: arrangements", details)
+                    send_mail(guest_emails, subject_title, details, html_body=html_details)
             else:
                 # In case of hotel only: do NOT send email to anyone, create in-app notification only
                 notify([req.applicant], CODE, req.id, subject_title, _link(req), details, email=False)
@@ -882,14 +1000,20 @@ def _arrange_page(req):
 
 
 def _render_arrange(req):
-    rooms = Room.query.join(GuestHouse).filter(Room.is_active, GuestHouse.is_active) \
-        .order_by(GuestHouse.name, Room.room_no).all()
+    target_site_id = req.site_id or g.get("site_id")
+    r_query = Room.query.join(GuestHouse).filter(Room.is_active, GuestHouse.is_active)
+    if target_site_id:
+        r_query = r_query.filter(GuestHouse.site_id == target_site_id)
+    rooms = r_query.order_by(GuestHouse.name, Room.room_no).all()
     # For each guest: which rooms are taken by someone else during their stay
     busy = {}
     for guest in req.guests:
         if guest.arrival and guest.departure:
             busy[guest.id] = {r.id: room_conflicts(r.id, guest.arrival, guest.departure, req.id)[:1] for r in rooms}
-    vehicles = Vehicle.query.filter_by(is_active=True).order_by(Vehicle.reg_no).all()
+    v_query = Vehicle.query.filter_by(is_active=True)
+    if target_site_id:
+        v_query = v_query.filter((Vehicle.site_id == target_site_id) | (Vehicle.site_id.is_(None)))
+    vehicles = v_query.order_by(Vehicle.reg_no).all()
     return render_template("guest_house/arrange.html", req=req, rooms=rooms, busy=busy, vehicles=vehicles,
                            hotels=Hotel.query.filter_by(is_active=True).order_by(Hotel.name).all(),
                            stay_types=STAY_TYPES, trip_types=TRIP_TYPES, expenses_by=get_expenses_by(),
@@ -1065,18 +1189,33 @@ def dashboard():
         day = date.fromisoformat(day) if day else date.today()
     except ValueError:
         day = date.today()
-    board = room_board(day)
+    site_id = g.get("site_id")
+    board = room_board(day, site_id=site_id)
     active_rooms = [r for r, _ in board if r.is_active and r.guest_house.is_active]
     occupied = [r for r, gs in board if gs]
     month_start = day.replace(day=1)
-    month_req = GuestRequest.query.filter(GuestRequest.submitted_at >= month_start).all()
+    req_q = GuestRequest.query.filter(GuestRequest.submitted_at >= month_start)
+    if site_id:
+        req_q = req_q.filter(GuestRequest.site_id == site_id)
+    month_req = req_q.all()
     start, end = datetime.combine(day, datetime.min.time()), datetime.combine(day + timedelta(days=1), datetime.min.time())
     live = Guest.query.join(GuestRequest).filter(GuestRequest.status.in_(BOOKED + ("completed",)))
+    trips_q = Trip.query.join(GuestRequest).filter(GuestRequest.status.in_(BOOKED + ("completed",)),
+                                                   Trip.start >= month_start)
+    dept_q = db.session.query(GuestRequest.department, func.count()).filter(GuestRequest.submitted_at >= month_start)
+    pend_q = GuestRequest.query.filter_by(status="pending")
+    arr_q = GuestRequest.query.filter_by(status="approved")
+
+    if site_id:
+        live = live.filter(GuestRequest.site_id == site_id)
+        trips_q = trips_q.filter(GuestRequest.site_id == site_id)
+        dept_q = dept_q.filter(GuestRequest.site_id == site_id)
+        pend_q = pend_q.filter(GuestRequest.site_id == site_id)
+        arr_q = arr_q.filter(GuestRequest.site_id == site_id)
+
     month_guests = live.filter(Guest.arrival >= month_start).all()
-    trips_month = Trip.query.join(GuestRequest).filter(GuestRequest.status.in_(BOOKED + ("completed",)),
-                                                       Trip.start >= month_start).all()
-    by_dept = db.session.query(GuestRequest.department, func.count()).filter(GuestRequest.submitted_at >= month_start) \
-        .group_by(GuestRequest.department).order_by(func.count().desc()).limit(8).all()
+    trips_month = trips_q.all()
+    by_dept = dept_q.group_by(GuestRequest.department).order_by(func.count().desc()).limit(8).all()
     upcoming = live.filter(Guest.arrival >= start, Guest.arrival < start + timedelta(days=7),
                            GuestRequest.status.in_(BOOKED)).order_by(Guest.arrival).all()
     stats = {
@@ -1086,8 +1225,8 @@ def dashboard():
         "in_house": live.filter(Guest.checked_in_at.isnot(None), Guest.checked_out_at.is_(None)).count(),
         "arrivals": live.filter(Guest.arrival >= start, Guest.arrival < end).count(),
         "departures": live.filter(Guest.departure >= start, Guest.departure < end).count(),
-        "pending": GuestRequest.query.filter_by(status="pending").count(),
-        "to_arrange": GuestRequest.query.filter_by(status="approved").count(),
+        "pending": pend_q.count(),
+        "to_arrange": arr_q.count(),
         "month_requests": len(month_req),
         "month_guests": len(month_guests),
         "month_rejected": len([r for r in month_req if r.status in ("rejected", "cancelled")]),
@@ -1118,7 +1257,10 @@ def reports():
     except ValueError:
         d_from, d_to = today.replace(day=1), today
     start, end = datetime.combine(d_from, datetime.min.time()), datetime.combine(d_to + timedelta(days=1), datetime.min.time())
+    site_id = g.get("site_id")
     q = Guest.query.join(GuestRequest).filter(Guest.arrival < end, Guest.departure >= start)
+    if site_id:
+        q = q.filter(GuestRequest.site_id == site_id)
     if a.get("status"):
         q = q.filter(GuestRequest.status == a["status"])
     if a.get("department"):
@@ -1342,6 +1484,12 @@ def masters(kind):
                         return redirect(url_for("guest_house.masters", kind=kind))
                     raw = int(raw) if raw else None
                 setattr(item, name, raw or None)
+            if hasattr(item, "site_id") and not item.site_id and g.get("site_id"):
+                item.site_id = g.site_id
+            if hasattr(item, "guest_house_id") and item.guest_house_id:
+                gh_obj = db.session.get(GuestHouse, item.guest_house_id)
+                if gh_obj and gh_obj.site_id:
+                    item.site_id = gh_obj.site_id
             db.session.add(item)
         try:
             db.session.commit()
@@ -1350,9 +1498,15 @@ def masters(kind):
             db.session.rollback()
             flash("That entry already exists.", "error")
         return redirect(url_for("guest_house.masters", kind=kind))
-    items = model.query.all()
+    q_items = model.query
+    if hasattr(model, "site_id") and g.get("site_id"):
+        q_items = q_items.filter((model.site_id == g.site_id) | (model.site_id.is_(None)))
+    items = q_items.all()
     items.sort(key=lambda i: (not i.is_active, str(i)))
     editing = db.session.get(model, request.args.get("edit", type=int) or 0)
+    gh_query = GuestHouse.query
+    if g.get("site_id"):
+        gh_query = gh_query.filter_by(site_id=g.site_id)
     return render_template("guest_house/masters.html", kind=kind, title=title, fields=fields, items=items,
-                           editing=editing, masters=MASTERS, guest_houses=GuestHouse.query.order_by(GuestHouse.name).all())
+                           editing=editing, masters=MASTERS, guest_houses=gh_query.order_by(GuestHouse.name).all())
 

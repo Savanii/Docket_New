@@ -22,12 +22,14 @@ TRIP_TYPES = ["Pickup", "Drop", "Local", "Pickup & drop", "Outstation"]
 class GuestHouse(db.Model):
     __tablename__ = "gh_guest_houses"
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(150), unique=True, nullable=False)
+    site_id = db.Column(db.Integer, db.ForeignKey("sites.id", ondelete="SET NULL"), index=True)
+    name = db.Column(db.String(150), nullable=False)
     location = db.Column(db.String(150))
     address = db.Column(db.Text)
     contact_phone = db.Column(db.String(50))
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     rooms = db.relationship("Room", back_populates="guest_house", order_by="Room.room_no")
+    site = db.relationship("core.models.Site")
 
     def __str__(self):
         return self.name
@@ -37,6 +39,7 @@ class Room(db.Model):
     __tablename__ = "gh_rooms"
     __table_args__ = (db.UniqueConstraint("guest_house_id", "room_no"),)
     id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("sites.id", ondelete="SET NULL"), index=True)
     guest_house_id = db.Column(db.Integer, db.ForeignKey("gh_guest_houses.id"), nullable=False)
     room_no = db.Column(db.String(30), nullable=False)
     room_type = db.Column(db.String(30), default="Single")
@@ -45,6 +48,7 @@ class Room(db.Model):
     remarks = db.Column(db.String(255))
     is_active = db.Column(db.Boolean, default=True, nullable=False)  # off = under maintenance
     guest_house = db.relationship("GuestHouse", back_populates="rooms")
+    site = db.relationship("core.models.Site")
 
     def __str__(self):
         return f"{self.guest_house.name} - {self.room_no}"
@@ -69,6 +73,7 @@ class Hotel(db.Model):
 class Vehicle(db.Model):
     __tablename__ = "gh_vehicles"
     id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("sites.id", ondelete="SET NULL"), index=True)
     reg_no = db.Column(db.String(30), unique=True, nullable=False)
     model = db.Column(db.String(100))
     vehicle_type = db.Column(db.String(50))
@@ -77,6 +82,7 @@ class Vehicle(db.Model):
     driver_name = db.Column(db.String(150))
     driver_phone = db.Column(db.String(50))
     is_active = db.Column(db.Boolean, default=True, nullable=False)
+    site = db.relationship("core.models.Site")
 
     def __str__(self):
         return f"{self.reg_no} ({self.model or self.vehicle_type or 'vehicle'})"
@@ -107,11 +113,13 @@ class ExpenseBorneBy(db.Model):
 class Location(db.Model):
     __tablename__ = "gh_locations"
     id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("sites.id", ondelete="SET NULL"), index=True)
     point_name = db.Column(db.String(150), nullable=False)
     city = db.Column(db.String(100))
     state = db.Column(db.String(100))
     location_type = db.Column(db.String(50), default="Domestic", nullable=False)  # Domestic / Outstation
     is_active = db.Column(db.Boolean, default=True, nullable=False)
+    site = db.relationship("core.models.Site")
 
     def __str__(self):
         parts = [self.point_name]
@@ -122,10 +130,12 @@ class Location(db.Model):
 class FoodLocation(db.Model):
     __tablename__ = "gh_food_locations"
     id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("sites.id", ondelete="SET NULL"), index=True)
     name = db.Column(db.String(150), nullable=False)
     category = db.Column(db.String(100), default="Plant Canteen", nullable=False)
     description = db.Column(db.String(255))
     is_active = db.Column(db.Boolean, default=True, nullable=False)
+    site = db.relationship("core.models.Site")
 
     def __str__(self):
         parts = [self.name]
@@ -177,6 +187,7 @@ class RailwayStation(db.Model):
 class GuestRequest(db.Model):
     __tablename__ = "gh_requests"
     id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("sites.id", ondelete="SET NULL"), index=True)
     req_no = db.Column(db.String(30), unique=True)
     applicant_id = db.Column(db.String(50), db.ForeignKey("employees.employee_id"), nullable=False, index=True)
     department = db.Column(db.String(150))  # snapshot at submission
@@ -217,6 +228,7 @@ class GuestRequest(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
 
     applicant = db.relationship("Employee", foreign_keys=[applicant_id])
+    site = db.relationship("core.models.Site")
     arranged_by = db.relationship("Employee", foreign_keys=[arranged_by_id])
     guests = db.relationship("Guest", back_populates="request", cascade="all, delete-orphan", order_by="Guest.id")
     trips = db.relationship("Trip", back_populates="request", cascade="all, delete-orphan", order_by="Trip.start")
@@ -407,7 +419,7 @@ def vehicle_conflicts(vehicle_id, start, end, exclude_request_id=None):
     return q.all()
 
 
-def room_board(day):
+def room_board(day, site_id=None):
     """{room: [guests holding it on that day]} for every room, incl. inactive ones."""
     start = datetime.combine(day, datetime.min.time())
     end = start + timedelta(days=1)
@@ -415,8 +427,13 @@ def room_board(day):
     busy = {}
     q = Guest.query.join(GuestRequest).filter(Guest.stay_type == "guest_house", Guest.room_id.isnot(None),
                                               GuestRequest.status.in_(BOOKED))
+    if site_id:
+        q = q.filter(GuestRequest.site_id == site_id)
     for g in q:
         if _overlaps(g.span(now), (start, end)):
             busy.setdefault(g.room_id, []).append(g)
-    rooms = Room.query.join(GuestHouse).order_by(GuestHouse.name, Room.room_no).all()
+    room_q = Room.query.join(GuestHouse)
+    if site_id:
+        room_q = room_q.filter(GuestHouse.site_id == site_id)
+    rooms = room_q.order_by(GuestHouse.name, Room.room_no).all()
     return [(room, busy.get(room.id, [])) for room in rooms]

@@ -20,12 +20,16 @@ def init_app(app):
 
     @app.cli.command("sync-employees")
     @click.option("--file", "path", help="Import an .xlsx/.csv instead of the SQL Server views.")
+    @click.option("--site-code", default=None, help="Site code to assign (e.g. 5110 or 5130).")
     @click.option("--active-only", is_flag=True, help="Sync only employees with status 'Active'.")
     @click.option("--staff-only", is_flag=True, help="Sync only Staff records.")
     @click.option("--assoc-only", is_flag=True, help="Sync only Associates records.")
     @click.option("--deactivate-missing", is_flag=True, help="Mark missing employees as Inactive.")
-    def sync_employees(path, active_only, staff_only, assoc_only, deactivate_missing):
+    def sync_employees(path, site_code, active_only, staff_only, assoc_only, deactivate_missing):
         """Sync the employee master (schedule this nightly)."""
+        from core.models import Site
+        site = Site.query.filter_by(code=site_code).first() if site_code else None
+        default_site_id = site.id if site else None
         if path:
             with open(path, "rb") as fh:
                 header, rows = sync.read_file(path, fh)
@@ -49,7 +53,7 @@ def init_app(app):
                 records += sync.normalize(header, rows, source)
             records.sort(key=lambda r: sync.SOURCE_PRIORITY.get(r["source"], 9), reverse=True)
         deact_unsel = True
-        stats = sync.upsert(records, deactivate_missing=deactivate_missing, deactivate_unselected=deact_unsel)
+        stats = sync.upsert(records, default_site_id=default_site_id, deactivate_missing=deactivate_missing, deactivate_unselected=deact_unsel)
         db.session.commit()
         total_kept = stats.get("kept_manual", 0) + stats.get("kept_staff", 0)
         click.echo(

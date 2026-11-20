@@ -7,7 +7,11 @@ from flask import abort, current_app, flash, g, redirect, request, session, url_
 from core.db import db
 from core.models import Employee
 
-OPEN_ENDPOINTS = {"auth.login", "auth.send_otp", "auth.verify_otp", "auth.password_login", "static", "favicon"}
+OPEN_ENDPOINTS = {
+    "auth.login", "auth.send_otp", "auth.verify_otp", "auth.password_login",
+    "main.email_approval_action", "main.api_approval_decide",
+    "static", "favicon",
+}
 
 
 def csrf_token():
@@ -25,12 +29,27 @@ def init_app(app):
             g.user = None
             flash("Your account is inactive.", "error")
 
+        if g.user is not None:
+            from core.models import Site
+            active_sid = session.get("active_site_id")
+            if active_sid:
+                g.site = db.session.get(Site, active_sid)
+                if not g.site or not g.site.is_active:
+                    g.site = g.user.site or Site.query.filter_by(is_active=True).first()
+            else:
+                g.site = g.user.site or Site.query.filter_by(is_active=True).first()
+            g.site_id = g.site.id if g.site else None
+        else:
+            g.site = None
+            g.site_id = None
+
         if request.method == "POST" and current_app.config["CSRF_ENABLED"]:
-            sent = request.form.get("_csrf") or request.headers.get("X-CSRF-Token", "")
-            if not hmac.compare_digest(sent, session.get("_csrf", "")):
-                # Stale page (e.g. back button after signing in): send them back with a fresh form.
-                flash("That form had expired - please try again.", "error")
-                return redirect(url_for("main.home") if g.user else url_for("auth.login"))
+            if not (request.endpoint == "main.api_approval_decide" or request.path.startswith("/api/")):
+                sent = request.form.get("_csrf") or request.headers.get("X-CSRF-Token", "")
+                if not hmac.compare_digest(sent, session.get("_csrf", "")):
+                    # Stale page (e.g. back button after signing in): send them back with a fresh form.
+                    flash("That form had expired - please try again.", "error")
+                    return redirect(url_for("main.home") if g.user else url_for("auth.login"))
 
         if g.user is None and request.endpoint not in OPEN_ENDPOINTS:
             return redirect(url_for("auth.login", next=request.full_path.rstrip("?") if request.method == "GET" else None))
@@ -38,11 +57,14 @@ def init_app(app):
     @app.context_processor
     def _template_globals():
         from core.access import can, visible_apps
-        from core.models import Notification
+        from core.models import Notification, Site
         from core.notify import unread
         from core.registry import APPS
         user = g.get("user")
         return {"csrf_token": csrf_token, "can": can, "APPS": APPS, "visible_apps": visible_apps, "current_user": user,
+                "current_site": g.get("site"),
+                "current_site_id": g.get("site_id"),
+                "available_sites": lambda: Site.query.filter_by(is_active=True).order_by(Site.name).all() if user else [],
                 "unread_count": lambda: unread(user).count() if user else 0,
                 "recent_notes": lambda: Notification.query.filter_by(employee_id=user.employee_id)
                 .order_by(Notification.id.desc()).limit(8).all() if user else [],

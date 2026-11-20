@@ -32,6 +32,34 @@
   </nav>
   <span class="spacer"></span>
   <div class="tb-actions">
+    {% if current_site %}
+      {% set all_sites = available_sites() %}
+      {% if all_sites|length > 1 and current_user.is_superadmin %}
+        <div class="menu" id="siteMenu">
+          <button class="btn btn-sm btn-outline" style="height:32px;display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:0 10px;font-weight:600;border-radius:6px;" aria-label="Switch site" aria-expanded="false">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            {{ current_site.name }} ({{ current_site.code }}) ▾
+          </button>
+          <div class="menu-panel" style="min-width:210px">
+            <div class="menu-head"><b>Active Site</b></div>
+            {% for s in all_sites %}
+              <form method="post" action="{{ url_for('main.switch_site', site_id=s.id) }}">
+                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+                <button type="submit" class="btn-link" style="width:100%;text-align:left;padding:8px 12px;display:flex;justify-content:space-between;align-items:center;text-decoration:none;color:inherit;font-size:13px;cursor:pointer;">
+                  <span>{{ s.name }} ({{ s.code }})</span>
+                  {% if s.id == current_site_id %}<span style="color:#0284c7;font-weight:bold;">✓</span>{% endif %}
+                </button>
+              </form>
+            {% endfor %}
+          </div>
+        </div>
+      {% else %}
+        <span class="badge" style="display:inline-flex;align-items:center;gap:4px;font-weight:600;padding:4px 9px;font-size:12px;background:#e0f2fe;color:#0369a1;border-radius:6px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          {{ current_site.name }} ({{ current_site.code }})
+        </span>
+      {% endif %}
+    {% endif %}
     {% set n = unread_count() %}
     <div class="menu" id="bellMenu">
       <button class="tb-icon tb-bell" aria-label="Notifications{{ ' (' ~ n ~ ' unread)' if n }}" aria-expanded="false">

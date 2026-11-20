@@ -15,7 +15,7 @@ class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'instance' / 'docket.db'}")
 
-    COMPANY_NAME = os.getenv("COMPANY_NAME", "JSW Jaigarh Port Ltd.")
+    COMPANY_NAME = os.getenv("COMPANY_NAME", "")
     # Optional announcement pill on the home page (like the COVID notice in the old portal).
     BANNER_TEXT = os.getenv("BANNER_TEXT", "")
     BANNER_URL = os.getenv("BANNER_URL", "")

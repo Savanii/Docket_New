@@ -26,6 +26,15 @@
     <label style="display:flex;align-items:center;gap:8px;margin-top:4px">
       <input type="checkbox" name="deactivate_missing" value="1" {{ 'checked' if saved_deactivate_missing }}> Mark missing employees from synced feeds as Inactive
     </label>
+    <div class="field" style="margin-top:10px">
+      <label><b>Target Site (Fallback)</b></label>
+      <select name="target_site_id" style="max-width:260px">
+        {% for s in sites %}
+        <option value="{{ s.id }}" {{ 'selected' if s.id == active_site_id }}>{{ s.name }} ({{ s.code }})</option>
+        {% endfor %}
+      </select>
+      <div class="small muted" style="margin-top:4px;">Employees are automatically mapped to sites by <b>Company Name</b> from Mantra (e.g. Jaigarh vs Dharamtar). The selected site is used as fallback for employees without transaction records.</div>
+    </div>
     <div class="help" style="margin-top:12px;padding:8px 12px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;color:#0369a1;font-size:12px;line-height:1.4">
       ℹ️ <b>Sync & Display Rule:</b>
       <ul style="margin:4px 0 0 18px;padding:0">
@@ -51,6 +60,14 @@
   <form method="post" enctype="multipart/form-data" class="card">
     <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="mode" value="file">
     <h2>Import a file (.xlsx / .csv)</h2>
+    <div class="field" style="margin-bottom:10px">
+      <label><b>Target Site</b></label>
+      <select name="target_site_id" style="max-width:260px">
+        {% for s in sites %}
+        <option value="{{ s.id }}" {{ 'selected' if s.id == active_site_id }}>{{ s.name }} ({{ s.code }})</option>
+        {% endfor %}
+      </select>
+    </div>
     <div class="field"><input type="file" name="file" accept=".xlsx,.xlsm,.csv" required></div>
     <label><input type="checkbox" name="deactivate_missing" value="1"> Mark previously uploaded employees missing from
       this file as Inactive</label>
