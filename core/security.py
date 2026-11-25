@@ -11,6 +11,7 @@ OPEN_ENDPOINTS = {
     "auth.login", "auth.send_otp", "auth.verify_otp", "auth.password_login",
     "main.email_approval_action", "main.api_approval_decide",
     "static", "favicon",
+    "site_sync.push_employees",  # checks its own per-site key
 }
 
 

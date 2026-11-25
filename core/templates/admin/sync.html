@@ -6,6 +6,7 @@
   <form method="post" class="card" autocomplete="off">
     <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="mode" value="source">
     <h2>Sync from Mantra (SQL Server)</h2>
+    <p class="help">To have each site push from its own Mantra instead, download its sync client under <a href="{{ url_for('admin.sites_page') }}">Sites</a>.</p>
     {% if not odbc_ready %}<p class="flash flash-info">Set <code>SOURCE_ODBC</code> in <code>.env</code> and install
       <code>pyodbc</code> to enable.</p>{% endif %}
     <div style="display:flex;gap:8px;margin:8px 0 12px;align-items:center">

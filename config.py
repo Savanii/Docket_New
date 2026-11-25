@@ -15,6 +15,10 @@ class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'instance' / 'docket.db'}")
 
+    # Address "python app.py" listens on.
+    APP_HOST = os.getenv("APP_HOST", "0.0.0.0")
+    APP_PORT = int(os.getenv("APP_PORT", "5050"))
+
     COMPANY_NAME = os.getenv("COMPANY_NAME", "")
     # Optional announcement pill on the home page (like the COVID notice in the old portal).
     BANNER_TEXT = os.getenv("BANNER_TEXT", "")

@@ -133,8 +133,12 @@ def resolve_site_id(rec, company_name=None, default_site_id=None, sites_by_code=
     return None
 
 
-def upsert(records, company_map=None, default_site_id=None, deactivate_missing=False, deactivate_unselected=False):
-    """Insert/update employees. Returns a stats dict. Caller commits."""
+def upsert(records, company_map=None, default_site_id=None, deactivate_missing=False, deactivate_unselected=False,
+           only_site=None):
+    """Insert/update employees. Returns a stats dict. Caller commits.
+
+    only_site: the records were pushed by that site, so they may only create or change its own people.
+    """
     now = datetime.now()
     stats = {
         "received": len(records),
@@ -144,11 +148,25 @@ def upsert(records, company_map=None, default_site_id=None, deactivate_missing=F
         "kept_manual": 0,
         "managers_linked": 0,
         "deactivated": 0,
+        "other_site": 0,
     }
     existing = {e.employee_id: e for e in Employee.query.all()}
     sites_by_code = {s.code: s.id for s in Site.query.all()}
     sites_by_name = {s.name: s.id for s in Site.query.all()}
     company_map = company_map or {}
+    # Sites that push their own people: a feed from elsewhere must not move or deactivate those.
+    push_sites = {s.id for s in Site.query.filter(Site.last_push_at.isnot(None))}
+
+    if only_site:
+        names = {only_site.name: only_site.id, **sites_by_name}  # own name first: wins when a company matches several
+
+        def is_ours(rec):
+            emp = existing.get(rec["employee_id"])
+            return only_site.id == ((emp.site_id if emp else None) or resolve_site_id(
+                rec, company_map.get(rec["employee_id"]), only_site.id, sites_by_code, names))
+
+        records = [r for r in records if is_ours(r)]
+        stats["other_site"] = stats["received"] - len(records)
 
     for rec in records:
         emp_id = rec["employee_id"]
@@ -179,20 +197,21 @@ def upsert(records, company_map=None, default_site_id=None, deactivate_missing=F
         if rec["department"]:
             emp.department = rec["department"]
 
-        target_site = resolve_site_id(
+        target_site = only_site.id if only_site else resolve_site_id(
             rec,
             company_name=emp.company_name,
             default_site_id=default_site_id,
             sites_by_code=sites_by_code,
             sites_by_name=sites_by_name,
         )
-        if target_site:
+        if target_site and emp.site_id not in push_sites:
             emp.site_id = target_site
 
         emp.email = rec["email"] or emp.email
         emp.last_synced_at = now
 
     # Second pass: managers may appear later in the feed than their reports.
+    db.session.flush()  # everyone must exist before anyone points at them (foreign key)
     for rec in records:
         emp = existing[rec["employee_id"]]
         if (
@@ -211,7 +230,8 @@ def upsert(records, company_map=None, default_site_id=None, deactivate_missing=F
         seen = {r["employee_id"] for r in records}
         sources = {r["source"] for r in records}
         for emp in existing.values():
-            if emp.source in sources and emp.employee_id not in seen and emp.is_active and not emp.is_superadmin:
+            if (emp.source in sources and emp.employee_id not in seen and emp.is_active and not emp.is_superadmin
+                    and emp.site_id not in push_sites):
                 emp.status = "Inactive"
                 stats["deactivated"] += 1
 
@@ -221,6 +241,7 @@ def upsert(records, company_map=None, default_site_id=None, deactivate_missing=F
             if (
                 emp.source not in synced_sources
                 and emp.source != "manual"
+                and emp.site_id not in push_sites
                 and emp.is_active
                 and not emp.is_superadmin
                 and emp.employee_id != "admin"

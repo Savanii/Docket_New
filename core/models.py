@@ -22,6 +22,9 @@ class Site(db.Model):
     name = db.Column(db.String(150), nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.now, nullable=False)
+    sync_key_hash = db.Column(db.String(64))  # SHA-256 of the key this site's sync client pushes with
+    last_push_at = db.Column(db.DateTime)
+    last_push_result = db.Column(db.String(255))
 
     def __str__(self):
         return f"{self.name} ({self.code})"

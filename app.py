@@ -3,7 +3,7 @@ from pathlib import Path
 from flask import Flask, redirect, url_for
 
 from config import Config
-from core import admin, auth, cli, registry, security, views
+from core import admin, auth, cli, registry, security, site_sync, views
 from core.db import db
 
 
@@ -17,7 +17,7 @@ def create_app(overrides=None):
 
     db.init_app(app)
     security.init_app(app)
-    for bp in (auth.bp, views.bp, admin.bp):
+    for bp in (auth.bp, views.bp, admin.bp, site_sync.bp):
         app.register_blueprint(bp)
     app.add_url_rule("/favicon.ico", "favicon", lambda: redirect(url_for("static", filename="img/logo.svg")))
     registry.discover(app)
@@ -27,4 +27,4 @@ def create_app(overrides=None):
 
 if __name__ == "__main__":
     app = create_app()
-    app.run(host="0.0.0.0", port=5050, debug=True)
+    app.run(host=app.config["APP_HOST"], port=app.config["APP_PORT"], debug=True)

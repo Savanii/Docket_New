@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Sync client - Administration{% endblock %}
+{% block content %}
+{% set heading, active = "Sync client - " ~ site, "sites" %}{% include "admin/_nav.html" %}
+
+<div class="grid g2" style="align-items:start;margin-top:16px;">
+  <form method="post" class="card" {% if site.sync_key_hash %}onsubmit="return confirm('This creates a new key. The client already installed at this site stops working until the new file is run there. Continue?')"{% endif %}>
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <h2>Download setup file for this site</h2>
+    <div class="field">
+      <label class="req" for="endpoint">Docket address the site server will call (IP or domain)</label>
+      <input type="text" id="endpoint" name="endpoint" value="{{ endpoint }}" required placeholder="http://10.0.0.5:5050">
+      <div class="help">{% if endpoint %}Detected automatically - change it if the site server reaches Docket another way.{% else %}Could not be detected - enter it here.{% endif %}
+        Use https when available: the key and employee data travel over this link.</div>
+    </div>
+    <button type="submit" class="btn btn-primary">{{ 'Generate new key and download' if site.sync_key_hash else 'Generate key and download' }}</button>
+    <p class="help">The key is only inside the downloaded file. Lost it? Download again to replace it.</p>
+  </form>
+
+  <section class="card">
+    <h2>Install on the site server</h2>
+    <ol style="margin:0 0 12px 18px;padding:0;line-height:1.7">
+      <li>Copy the downloaded <code>.bat</code> to the site server and double-click it.</li>
+      <li>Answer the questions: Mantra server, database, login and daily push times.</li>
+      <li>It tests one real push, then schedules it in Task Scheduler.</li>
+      <li>Delete the downloaded copy - it contains the key.</li>
+    </ol>
+    <p class="help">Nothing else to install: no Python, ODBC driver or NSSM.</p>
+    <p class="help">Endpoint: <code>POST {{ url_for('site_sync.push_employees', site_id=site.id) }}</code><br>
+      Key: {{ 'set' if site.sync_key_hash else 'not generated yet' }}<br>
+      Last push: {{ site.last_push_at.strftime('%d %b %Y %H:%M') ~ ' - ' ~ site.last_push_result if site.last_push_at else 'never' }}</p>
+  </section>
+</div>
+{% endblock %}

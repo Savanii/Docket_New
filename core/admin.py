@@ -216,16 +216,7 @@ def sync_page():
     if request.method == "POST":
         deactivate = bool(request.form.get("deactivate_missing"))
         deactivate_unselected = bool(request.form.get("deactivate_unselected"))
-        target_site_id = request.form.get("target_site_id", type=int)
-        if not target_site_id:
-            if odbc and "JSW_Dharamtar" in odbc:
-                dhr = Site.query.filter_by(code="5130").first()
-                target_site_id = dhr.id if dhr else None
-            elif odbc and ("Jaigarh" in odbc or "JSWIP-JGD" in odbc):
-                jgd = Site.query.filter_by(code="5110").first()
-                target_site_id = jgd.id if jgd else None
-            else:
-                target_site_id = g.get("site_id")
+        target_site_id = request.form.get("target_site_id", type=int) or g.get("site_id")
         try:
             if request.form.get("mode") == "file":
                 upload = request.files.get("file")
@@ -457,9 +448,11 @@ def sites_page():
             elif Site.query.filter_by(code=code).first():
                 flash(f"Site code '{code}' already exists.", "error")
             else:
-                db.session.add(Site(code=code, name=name, is_active=True))
+                site = Site(code=code, name=name, is_active=True)
+                db.session.add(site)
                 db.session.commit()
-                flash(f"Site '{name}' ({code}) added.", "success")
+                flash(f"Site '{name}' ({code}) added. Now download its sync client.", "success")
+                return redirect(url_for("site_sync.client", site_id=site.id))
         elif action == "toggle":
             site_id = request.form.get("site_id", type=int)
             site = db.session.get(Site, site_id)
